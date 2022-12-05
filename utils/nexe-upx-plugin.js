@@ -19,6 +19,7 @@ module.exports = (useCompressed) => {
         }
         else {
           console.log("Compressing node executable '" + compiler.options.target + "'");
+          fs.chmodSync(nodeBinFile + "-org", 0755);
           upx(nodeBinFile + "-org").output(nodeBinFile).start().catch((err) => {
             console.log("UPX failed: ");
             console.log(err);
