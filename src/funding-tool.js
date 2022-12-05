@@ -142,16 +142,6 @@ async function main() {
   }
 
   await startWeb3();
-
-  if(options['use-distributor']) {
-    var distributorAddr = await deployDistributor();
-    console.log("enabled distributor contract: " + distributorAddr);
-    distributor = {
-      addr: distributorAddr,
-      contract: new web3.eth.Contract(distributorContract.abi, distributorAddr),
-    };
-  }
-
   await processFundings();
   await Promise.all(pendingQueue.map((entry) => entry.promise));
 
@@ -204,6 +194,14 @@ async function startWeb3() {
     wallet.nonce = res[2];
     console.log("wallet " + wallet.addr + " balance: " + weiToEth(wallet.balance) + " ETH [nonce: " + wallet.nonce + "]");
     
+    if(options['use-distributor']) {
+      var distributorAddr = await deployDistributor();
+      console.log("enabled distributor contract: " + distributorAddr);
+      distributor = {
+        addr: distributorAddr,
+        contract: new web3.eth.Contract(distributorContract.abi, distributorAddr),
+      };
+    }
 
   } catch(ex) {
     console.error("web3 exception: ", ex);
