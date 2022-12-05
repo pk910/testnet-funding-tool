@@ -2,10 +2,13 @@
 const fs = require("fs");
 const commandLineArgs = require('command-line-args');
 const commandLineUsage = require('command-line-usage');
+const RLP = require('rlp');
 const Web3 = require('web3');
 const EthTx = require('@ethereumjs/tx');
 const EthCom = require('@ethereumjs/common');
 const EthUtil = require('ethereumjs-util');
+
+const distributorContract = require("../Contracts/Distributor.json");
 
 const optionDefinitions = [
   {
@@ -65,6 +68,18 @@ const optionDefinitions = [
     typeLabel: '{underline 1.2}',
     defaultValue: 1.2,
   },
+  {
+    name: 'use-distributor',
+    description: 'Use a distribution contract.',
+    type: Boolean,
+  },
+  {
+    name: 'distributor-batch-size',
+    description: 'The max size of transaction batches to send via the distributor contract.',
+    type: Number,
+    typeLabel: '{underline 20}',
+    defaultValue: 20,
+  },
 ];
 const options = commandLineArgs(optionDefinitions);
 
@@ -73,6 +88,7 @@ var web3Common = null;
 var wallet = null;
 var fundings;
 var pendingQueue = [];
+var distributor = null;
 
 main();
 
@@ -126,6 +142,16 @@ async function main() {
   }
 
   await startWeb3();
+
+  if(options['use-distributor']) {
+    var distributorAddr = await deployDistributor();
+    console.log("enabled distributor contract: " + distributorAddr);
+    distributor = {
+      addr: distributorAddr,
+      contract: new web3.eth.Contract(distributorContract.abi, distributorAddr),
+    };
+  }
+
   await processFundings();
   await Promise.all(pendingQueue.map((entry) => entry.promise));
 
@@ -188,14 +214,25 @@ async function startWeb3() {
 
 async function processFundings() {
   try {
+    var distrCount;
     while(fundings.length > 0) {
       if(pendingQueue.length >= options['maxpending']) {
         await sleepPromise(2000);
         continue;
       }
 
-      await processFunding(fundings[0].address, fundings[0].amount);
-      fundings.shift();
+      if(distributor) {
+        distrCount = fundings.length;
+        if(distrCount > options['distributor-batch-size'])
+          distrCount = options['distributor-batch-size'];
+        
+        await processFundingBatch(fundings.slice(0, distrCount));
+        fundings.splice(0, distrCount);
+      }
+      else {
+        await processFunding(fundings[0].address, fundings[0].amount);
+        fundings.shift();
+      }
     }
   } catch(ex) {
     console.error("funding loop exception: ", ex);
@@ -278,4 +315,103 @@ async function sendTransaction(txhex) {
 
   let txHash = await txhashPromise;
   return [txHash, receiptPromise];
+}
+
+
+async function deployDistributor() {
+  var distributorStateFile = "distributor.json";
+  var distributorState;
+  if(fs.existsSync(distributorStateFile))
+    distributorState = JSON.parse(fs.readFileSync(distributorStateFile, "utf8"));
+  else
+    distributorState = {};
+
+  if(distributorState.contractAddr) {
+    var code = await web3.eth.getCode(distributorState.contractAddr);
+    if(code == "0x"+distributorContract.deployed)
+      return distributorState.contractAddr;
+  }
+
+  var nonce = wallet.nonce;
+  var rawTx = {
+    nonce: nonce,
+    gasLimit: 500000,
+    maxPriorityFeePerGas: options['maxpriofee'] * 1000000000,
+    maxFeePerGas: options['maxfeepergas'] * 1000000000,
+    from: wallet.addr,
+    to: null,
+    value: 0,
+    data: Buffer.from(distributorContract.bytecode, "hex"),
+  };
+  var privateKey = Uint8Array.from(wallet.privkey);
+  var tx = EthTx.FeeMarketEIP1559Transaction.fromTxData(rawTx, { common: web3Common });
+  tx = tx.sign(privateKey);
+  var txhex = tx.serialize().toString('hex');
+
+  var txres = await sendTransaction(txhex);
+  wallet.nonce++;
+  console.log("deploying distributor contract (tx: " + txres[0] + ")");
+
+  var deployEnc = Buffer.from(RLP.encode([wallet.addr, nonce]));
+  var deployHash = web3.utils.sha3(deployEnc);
+  var deployAddr = web3.utils.toChecksumAddress("0x"+deployHash.substring(26));
+
+  distributorState.contractAddr = deployAddr;
+  fs.writeFileSync(distributorStateFile, JSON.stringify(distributorState));
+
+  return deployAddr;
+}
+
+async function processFundingBatch(batch) {
+  var totalAmount = BigInt(0);
+  batch.forEach((entry) => {
+    console.log("process funding " + entry.address + ":  " + weiToEth(entry.amount) + " ETH");
+    totalAmount += entry.amount;
+  });
+
+  if(totalAmount > wallet.balance) {
+    console.log("  batch size (" + weiToEth(totalAmount) + " ETH) exceeds wallet balance (" + weiToEth(wallet.balance) + " ETH)");
+    return;
+  }
+
+  var nonce = wallet.nonce;
+  var rawTx = {
+    nonce: nonce,
+    gasLimit: 500000,
+    maxPriorityFeePerGas: options['maxpriofee'] * 1000000000,
+    maxFeePerGas: options['maxfeepergas'] * 1000000000,
+    from: wallet.addr,
+    to: distributor.addr,
+    value: "0x" + totalAmount.toString(16),
+    data: distributor.contract.methods.distribute(
+      batch.map((e) => e.address),
+      batch.map((e) => e.amount),
+    ).encodeABI()
+  };
+
+  var privateKey = Uint8Array.from(wallet.privkey);
+  var tx = EthTx.FeeMarketEIP1559Transaction.fromTxData(rawTx, { common: web3Common });
+  tx = tx.sign(privateKey);
+
+  var txhex = tx.serialize().toString('hex');
+  var txres = await sendTransaction(txhex);
+  console.log("  tx hash: " + txres[0]);
+
+  var txobj = {
+    nonce: nonce,
+    hash: txres[0],
+    hex: txhex,
+    promise: txres[1],
+  };
+  wallet.nonce++;
+  wallet.balance -= totalAmount;
+  pendingQueue.push(txobj);
+
+  txres[1].then(() => {
+    let txobjIdx = pendingQueue.indexOf(txobj);
+    if(txobjIdx > -1)
+      pendingQueue.splice(txobjIdx, 1);
+  }, (err) => {
+    console.error("tx [" + txres[0] + "] error: ", err);
+  })
 }

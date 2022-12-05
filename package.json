@@ -1,6 +1,6 @@
 {
   "name": "testnet-funding-tool",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -17,6 +17,7 @@
     "eventsource": "^2.0.2",
     "nexe": "^4.0.0-beta.16",
     "node-fetch": "^2.6.7",
+    "rlp": "^3.0.0",
     "upx": "^1.0.6",
     "web3": "^1.8.1",
     "webpack": "^5.15.0"
