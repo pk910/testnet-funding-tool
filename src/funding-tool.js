@@ -86,7 +86,7 @@ const options = commandLineArgs(optionDefinitions);
 var web3 = null;
 var web3Common = null;
 var wallet = null;
-var fundings;
+var fundings = [];
 var pendingQueue = [];
 var distributor = null;
 
@@ -114,7 +114,7 @@ async function main() {
 
   if(options['fundings']) {
     var fundingList = fs.readFileSync(options['fundings'], "utf8");
-    fundings = fundingList.split("\n").map((fundingLine) => {
+    Array.prototype.push.apply(fundings, fundingList.split("\n").map((fundingLine) => {
       let fundingEntry = fundingLine.split(":");
       if(fundingEntry.length < 2)
         return;
@@ -122,16 +122,16 @@ async function main() {
         address: fundingEntry[0],
         amount: BigInt(fundingEntry[1])
       };
-    }).filter((entry) => !!entry);
+    }).filter((entry) => !!entry));
   }
-  else if(options['fundings-js']) {
+  if(options['fundings-js']) {
     var fundingsJsCode = fs.readFileSync(options['fundings-js'], "utf8");
     var fundingsJsRes = eval(fundingsJsCode);
     if(typeof fundingsJsRes === "function")
       fundingsJsRes = fundingsJsRes();
     if(fundingsJsRes && typeof fundingsJsRes.then === "function")
       fundingsJsRes = await fundingsJsRes;
-    fundings = fundingsJsRes;
+    Array.prototype.push.apply(fundings, fundingsJsRes);
   }
   
   if(!fundings || fundings.length == 0) {
