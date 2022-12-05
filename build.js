@@ -102,7 +102,7 @@ function buildClient() {
         target: cliBuild.target,
         temp: buildPath,
         silent: true,
-        resources: [],
+        resources: [ path.join(buildPath, 'app.js') ],
         plugins: [ nexeUpxPlugin(!debugMode) ]
       });
     }));
