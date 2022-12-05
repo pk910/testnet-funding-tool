@@ -319,7 +319,7 @@ async function sendTransaction(txhex) {
 
 
 async function deployDistributor() {
-  var distributorStateFile = "distributor.json";
+  var distributorStateFile = "distributor-state.json";
   var distributorState;
   if(fs.existsSync(distributorStateFile))
     distributorState = JSON.parse(fs.readFileSync(distributorStateFile, "utf8"));

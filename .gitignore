@@ -2,4 +2,4 @@ build
 node_modules
 release
 test*
-distributor.json
+distributor-state.json
