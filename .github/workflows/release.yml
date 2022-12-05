@@ -1,0 +1,78 @@
+
+name: Release
+
+on:
+  workflow_dispatch:
+
+
+jobs:
+
+  build_release:
+    name: Build Release
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Use Node.js 15.x
+      uses: actions/setup-node@v3
+      with:
+        node-version: 15.x
+
+    - name: Install node dependencies
+      run: npm i
+
+    - name: Build graffiti daemon
+      run: node ./build.js
+
+    - name: Get version from package.json
+      run: |
+        echo "version=$(cat package.json | grep '"version"' | sed 's/.*"version": *\"\([0-9.]*\)\",/\1/g' | tr -d '\n')" >> $GITHUB_OUTPUT
+      id: version
+
+    - name: Create release
+      uses: actions/create-release@v1
+      id: create_release
+      with:
+        draft: false
+        prerelease: false
+        release_name: "${{ steps.version.outputs.version }}"
+        tag_name: "${{ steps.version.outputs.version }}"
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+
+    - name: Upload funding-tool-amd64 artifact
+      uses: actions/upload-release-asset@v1
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./release/funding-tool-amd64
+        asset_name: funding-tool-amd64
+        asset_content_type: application/octet-stream
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+    - name: Upload funding-tool-x86 artifact
+      uses: actions/upload-release-asset@v1
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./release/funding-tool-x86
+        asset_name: funding-tool-x86
+        asset_content_type: application/octet-stream
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+    - name: Upload funding-tool-win64.exe artifact
+      uses: actions/upload-release-asset@v1
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./release/funding-tool-win64.exe
+        asset_name: funding-tool-win64.exe
+        asset_content_type: application/octet-stream
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+    - name: Upload funding-tool-win32.exe artifact
+      uses: actions/upload-release-asset@v1
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./release/funding-tool-win32.exe
+        asset_name: funding-tool-win32.exe
+        asset_content_type: application/octet-stream
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
