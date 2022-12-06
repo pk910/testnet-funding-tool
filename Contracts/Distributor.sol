@@ -2,7 +2,6 @@
 pragma solidity ^0.8.17;
 
 contract Distributor {
-  event Distributed(address addr, uint256 amount);
 
   function distribute(address[] calldata addrs, uint256[] calldata values) public payable {
     uint256 i = 0;
@@ -15,7 +14,6 @@ contract Distributor {
         (bool sent, ) = payable(addrs[i]).call{value: values[i]}("");
         require(sent, "failed to send ether");
 
-        emit Distributed(addrs[i], values[i]);
         i++;
     }
   }
