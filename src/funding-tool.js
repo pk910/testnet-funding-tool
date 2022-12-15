@@ -55,6 +55,13 @@ const optionDefinitions = [
     defaultValue: 10,
   },
   {
+    name: 'gaslimit',
+    description: 'The gas limit for transactions.',
+    type: Number,
+    typeLabel: '{underline 500000}',
+    defaultValue: 500000,
+  },
+  {
     name: 'maxfeepergas',
     description: 'The maximum fee per gas in gwei.',
     type: Number,
@@ -115,12 +122,15 @@ async function main() {
   if(options['fundings']) {
     var fundingList = fs.readFileSync(options['fundings'], "utf8");
     Array.prototype.push.apply(fundings, fundingList.split("\n").map((fundingLine) => {
-      let fundingEntry = fundingLine.split(":");
+      var cmtPos;
+      if((cmtPos = fundingLine.indexOf("#")) !== -1)
+        fundingLine = fundingLine.substring(0, cmtPos);
+      var fundingEntry = fundingLine.trim().split(":");
       if(fundingEntry.length < 2)
         return;
       return {
         address: fundingEntry[0],
-        amount: BigInt(fundingEntry[1])
+        amount: BigInt(fundingEntry[1].replace(/ETH/i, "000000000000000000"))
       };
     }).filter((entry) => !!entry));
   }
@@ -273,7 +283,7 @@ async function processFunding(address, amount) {
 function buildEthTx(to, amount, nonce) {
   var rawTx = {
     nonce: nonce,
-    gasLimit: 50000,
+    gasLimit: options['gaslimit'],
     maxPriorityFeePerGas: options['maxpriofee'] * 1000000000,
     maxFeePerGas: options['maxfeepergas'] * 1000000000,
     from: wallet.addr,
@@ -333,7 +343,7 @@ async function deployDistributor() {
   var nonce = wallet.nonce;
   var rawTx = {
     nonce: nonce,
-    gasLimit: 500000,
+    gasLimit: options['gaslimit'],
     maxPriorityFeePerGas: options['maxpriofee'] * 1000000000,
     maxFeePerGas: options['maxfeepergas'] * 1000000000,
     from: wallet.addr,
@@ -375,7 +385,7 @@ async function processFundingBatch(batch) {
   var nonce = wallet.nonce;
   var rawTx = {
     nonce: nonce,
-    gasLimit: 500000,
+    gasLimit: options['gaslimit'],
     maxPriorityFeePerGas: options['maxpriofee'] * 1000000000,
     maxFeePerGas: options['maxfeepergas'] * 1000000000,
     from: wallet.addr,
