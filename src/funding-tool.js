@@ -120,19 +120,8 @@ async function main() {
   };
 
   if(options['fundings']) {
-    var fundingList = fs.readFileSync(options['fundings'], "utf8");
-    Array.prototype.push.apply(fundings, fundingList.split("\n").map((fundingLine) => {
-      var cmtPos;
-      if((cmtPos = fundingLine.indexOf("#")) !== -1)
-        fundingLine = fundingLine.substring(0, cmtPos);
-      var fundingEntry = fundingLine.trim().split(":");
-      if(fundingEntry.length < 2)
-        return;
-      return {
-        address: fundingEntry[0],
-        amount: BigInt(fundingEntry[1].replace(/ETH/i, "000000000000000000"))
-      };
-    }).filter((entry) => !!entry));
+    var fundingList = fs.readFileSync(options['fundings'], "utf8").split("\n");
+    loadFundingFile(fundings, fundingList);
   }
   if(options['fundings-js']) {
     var fundingsJsCode = fs.readFileSync(options['fundings-js'], "utf8");
@@ -141,7 +130,10 @@ async function main() {
       fundingsJsRes = fundingsJsRes();
     if(fundingsJsRes && typeof fundingsJsRes.then === "function")
       fundingsJsRes = await fundingsJsRes;
-    Array.prototype.push.apply(fundings, fundingsJsRes);
+
+    for(var i = 0; i < fundingsJsRes.length; i++) {
+      fundings.push(fundingsJsRes[i]);
+    }
   }
   
   if(!fundings || fundings.length == 0) {
@@ -179,6 +171,22 @@ function sleepPromise(timeout) {
 
 function weiToEth(wei) {
   return parseInt((wei / 1000000000000000n).toString()) / 1000;
+}
+
+function loadFundingFile(resArray, fundingList) {
+  var fundingLine, cmtPos, fundingEntry;
+  for(var i = 0; i < fundingList.length; i++) {
+    fundingLine = fundingList[i];
+    if((cmtPos = fundingLine.indexOf("#")) !== -1)
+      fundingLine = fundingLine.substring(0, cmtPos);
+    fundingEntry = fundingLine.trim().split(":");
+    if(fundingEntry.length < 2)
+      continue;
+    resArray.push({
+      address: fundingEntry[0],
+      amount: BigInt(fundingEntry[1].replace(/ETH/i, "000000000000000000"))
+    });
+  }
 }
 
 async function startWeb3() {
