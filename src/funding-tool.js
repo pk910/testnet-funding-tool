@@ -87,6 +87,26 @@ const optionDefinitions = [
     typeLabel: '{underline 20}',
     defaultValue: 20,
   },
+  {
+    name: 'output',
+    description: 'Output signed transactions to file instead of broadcasting them (offline mode).',
+    alias: 'o',
+    type: String,
+    typeLabel: '{underline txlist.txt}',
+  },
+  {
+    name: 'chainid',
+    description: 'ChainID of the network (For offline mode in combination with --output)',
+    type: Number,
+    typeLabel: '{underline 5}',
+  },
+  {
+    name: 'nonce',
+    description: 'Current nonce of the wallet (For offline mode in combination with --output)',
+    type: Number,
+    typeLabel: '{underline 0}',
+    defaultValue: 0,
+  },
 ];
 const options = commandLineArgs(optionDefinitions);
 
@@ -143,7 +163,18 @@ async function main() {
     return;
   }
 
-  await startWeb3();
+  if(options['output'] && options['chainid']) {
+    // use in offline mode
+    web3 = new Web3();
+    wallet.offline = true;
+    wallet.chainid = options['chainid'];
+    wallet.nonce = options['nonce'];
+  }
+  else {
+    await startWeb3();
+  }
+  initWeb3Chain(wallet.chainid);
+  await initDistributor();
   await processFundings();
   await Promise.all(pendingQueue.map((entry) => entry.promise));
 
@@ -201,30 +232,32 @@ async function startWeb3() {
       web3.eth.getTransactionCount(wallet.addr)
     ]);
     wallet.chainid = res[0];
-
-    console.log("initialize web3 with chainid " + wallet.chainid);
-    web3Common = EthCom.default.forCustomChain('mainnet', {
-      networkId: wallet.chainid,
-      chainId: wallet.chainid,
-    }, 'london');
-
     wallet.balance = BigInt(res[1]);
     wallet.nonce = res[2];
     console.log("wallet " + wallet.addr + " balance: " + weiToEth(wallet.balance) + " ETH [nonce: " + wallet.nonce + "]");
-    
-    if(options['use-distributor']) {
-      var distributorAddr = await deployDistributor();
-      console.log("enabled distributor contract: " + distributorAddr);
-      distributor = {
-        addr: distributorAddr,
-        contract: new web3.eth.Contract(distributorContract.abi, distributorAddr),
-      };
-    }
-
   } catch(ex) {
     console.error("web3 exception: ", ex);
     await sleepPromise(5000);
     await startWeb3();
+  }
+}
+
+function initWeb3Chain(chainid) {
+  console.log("initialize web3 with chainid " + chainid);
+  web3Common = EthCom.default.forCustomChain('mainnet', {
+    networkId: chainid,
+    chainId: chainid,
+  }, 'london');
+}
+
+async function initDistributor() {
+  if(options['use-distributor']) {
+    var distributorAddr = await deployDistributor();
+    console.log("enabled distributor contract: " + distributorAddr);
+    distributor = {
+      addr: distributorAddr,
+      contract: new web3.eth.Contract(distributorContract.abi, distributorAddr),
+    };
   }
 }
 
@@ -260,13 +293,13 @@ async function processFundings() {
 async function processFunding(address, amount) {
   console.log("process funding " + address + ":  " + weiToEth(amount) + " ETH");
 
-  if(amount > wallet.balance) {
+  if(amount > wallet.balance && !wallet.offline) {
     console.log("  amount exceeds wallet balance (" + weiToEth(wallet.balance) + " ETH)");
     return;
   }
 
   var txhex = buildEthTx(address, amount, wallet.nonce);
-  var txres = await sendTransaction(txhex);
+  var txres = await publishTransaction(txhex);
   console.log("  tx hash: " + txres[0]);
 
   var txobj = {
@@ -276,7 +309,8 @@ async function processFunding(address, amount) {
     promise: txres[1],
   };
   wallet.nonce++;
-  wallet.balance -= amount;
+  if(!wallet.offline)
+    wallet.balance -= amount;
   pendingQueue.push(txobj);
 
   txres[1].then(() => {
@@ -306,6 +340,17 @@ function buildEthTx(to, amount, nonce) {
   return txRes;
 }
 
+async function publishTransaction(txhex) {
+  if(options['output']) {
+    // redirect to file
+    return outputTransaction(txhex);
+  }
+  else {
+    // send transaction
+    return sendTransaction(txhex);
+  }
+}
+
 async function sendTransaction(txhex) {
   var txhashResolve, txhashReject;
   var txhashPromise = new Promise((resolve, reject) => {txhashResolve = resolve; txhashReject = reject; });
@@ -333,6 +378,12 @@ async function sendTransaction(txhex) {
   return [txHash, receiptPromise];
 }
 
+async function outputTransaction(txhex) {
+  fs.appendFileSync(options['output'], "0x" + txhex + "\n");
+  let txHash = "0x" + EthUtil.keccak256(Buffer.from(txhex, "hex")).toString("hex");
+  return [txHash, Promise.resolve()];
+}
+
 
 async function deployDistributor() {
   var distributorStateFile = "distributor-state.json";
@@ -342,7 +393,7 @@ async function deployDistributor() {
   else
     distributorState = {};
 
-  if(distributorState.contractAddr) {
+  if(distributorState.contractAddr && !wallet.offline) {
     var code = await web3.eth.getCode(distributorState.contractAddr);
     if(code == "0x"+distributorContract.deployed)
       return distributorState.contractAddr;
@@ -364,7 +415,7 @@ async function deployDistributor() {
   tx = tx.sign(privateKey);
   var txhex = tx.serialize().toString('hex');
 
-  var txres = await sendTransaction(txhex);
+  var txres = await publishTransaction(txhex);
   wallet.nonce++;
   console.log("deploying distributor contract (tx: " + txres[0] + ")");
 
@@ -385,7 +436,7 @@ async function processFundingBatch(batch) {
     totalAmount += entry.amount;
   });
 
-  if(totalAmount > wallet.balance) {
+  if(totalAmount > wallet.balance && !wallet.offline) {
     console.log("  batch size (" + weiToEth(totalAmount) + " ETH) exceeds wallet balance (" + weiToEth(wallet.balance) + " ETH)");
     return;
   }
@@ -410,7 +461,7 @@ async function processFundingBatch(batch) {
   tx = tx.sign(privateKey);
 
   var txhex = tx.serialize().toString('hex');
-  var txres = await sendTransaction(txhex);
+  var txres = await publishTransaction(txhex);
   console.log("  tx hash: " + txres[0]);
 
   var txobj = {
@@ -420,7 +471,8 @@ async function processFundingBatch(batch) {
     promise: txres[1],
   };
   wallet.nonce++;
-  wallet.balance -= totalAmount;
+  if(!wallet.offline)
+    wallet.balance -= totalAmount;
   pendingQueue.push(txobj);
 
   txres[1].then(() => {
