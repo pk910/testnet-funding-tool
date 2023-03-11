@@ -19,6 +19,12 @@ const optionDefinitions = [
     type: Boolean
   },
   {
+    name: 'verbose',
+    description: 'Run the script with verbose output',
+    alias: 'v',
+    type: Boolean,
+  },
+  {
     name: 'fundings',
     description: 'The list of fundings (list of address:amount lines)',
     alias: 'f',
@@ -314,7 +320,10 @@ async function initDistributor() {
 
 async function processFundings() {
   try {
-    var distrCount;
+    let distrCount;
+    let lastLogIdx = 0;
+    let totalCount = fundings.length;
+
     while(fundings.length > 0) {
       if(pendingQueue.length >= options['maxpending']) {
         await sleepPromise(2000);
@@ -333,6 +342,9 @@ async function processFundings() {
         await processFunding(fundings[0].address, fundings[0].amount);
         fundings.shift();
       }
+
+      if(stats.transactionCount - lastLogIdx >= 100)
+        console.log("distributing... progress: " + stats.transferCount + " / " + totalCount);
     }
   } catch(ex) {
     console.error("funding loop exception: ", ex);
@@ -342,7 +354,8 @@ async function processFundings() {
 }
 
 async function processFunding(address, amount) {
-  console.log("process funding " + address + ":  " + weiToEth(amount) + " ETH");
+  if(options['verbose'])
+    console.log("process funding " + address + ":  " + weiToEth(amount) + " ETH");
 
   if(amount > wallet.balance && !wallet.offline) {
     console.log("  amount exceeds wallet balance (" + weiToEth(wallet.balance) + " ETH)");
@@ -351,7 +364,8 @@ async function processFunding(address, amount) {
 
   var txhex = buildEthTx(address, amount, wallet.nonce);
   var txres = await publishTransaction(txhex);
-  console.log("  tx hash: " + txres[0]);
+  if(options['verbose'])
+    console.log("  tx hash: " + txres[0]);
 
   stats.transferCount++;
   stats.transactionCount++;
@@ -489,7 +503,8 @@ async function deployDistributor() {
 async function processFundingBatch(batch) {
   var totalAmount = BigInt(0);
   batch.forEach((entry) => {
-    console.log("process funding " + entry.address + ":  " + weiToEth(entry.amount) + " ETH");
+    if(options['verbose'])
+      console.log("process funding " + entry.address + ":  " + weiToEth(entry.amount) + " ETH");
     totalAmount += entry.amount;
     stats.transferCount++;
   });
@@ -520,7 +535,8 @@ async function processFundingBatch(batch) {
 
   var txhex = tx.serialize().toString('hex');
   var txres = await publishTransaction(txhex);
-  console.log("  tx hash: " + txres[0]);
+  if(options['verbose'])
+    console.log("  tx hash: " + txres[0]);
 
   stats.transactionCount++;
   stats.totalAmount += totalAmount;
