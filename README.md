@@ -5,6 +5,7 @@
 # Options
 ```
   -h, --help                            Display this usage guide.
+  -v, --verbose                         Run the script with verbose output
   -f, --fundings fundings.txt           The list of fundings (list of address:amount lines)
   -j, --fundings-js fundings.js         A js file that returns a list of fundings on execution
   -r, --rpchost http://127.0.0.1:8545   The RPC host to send transactions to.
