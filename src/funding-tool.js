@@ -7,6 +7,7 @@ const Web3 = require('web3');
 const EthTx = require('@ethereumjs/tx');
 const EthCom = require('@ethereumjs/common');
 const EthUtil = require('ethereumjs-util');
+const EthWallet = require('ethereumjs-wallet');
 
 const distributorContract = require("../Contracts/Distributor.json");
 
@@ -41,10 +42,15 @@ const optionDefinitions = [
   },
   {
     name: 'privkey',
-    description: 'The private key of the wallet to send funds from.',
+    description: 'The private key of the wallet to send funds from.\n(Special: "env" to read from FUNDINGTOOL_PRIVKEY environment variable)',
     alias: 'p',
     type: String,
     typeLabel: '{underline privkey}',
+  },
+  {
+    name: 'random-privkey',
+    description: 'Use random private key if no privkey supplied',
+    type: Boolean,
   },
   {
     name: 'maxpending',
@@ -95,6 +101,12 @@ const optionDefinitions = [
     typeLabel: '{underline txlist.txt}',
   },
   {
+    name: 'summary',
+    description: 'Output summary of distribution to file.',
+    type: String,
+    typeLabel: '{underline summary.txt}',
+  },
+  {
     name: 'chainid',
     description: 'ChainID of the network (For offline mode in combination with --output)',
     type: Number,
@@ -116,6 +128,11 @@ var wallet = null;
 var fundings = [];
 var pendingQueue = [];
 var distributor = null;
+var stats = {
+  transferCount: 0,
+  transactionCount: 0,
+  totalAmount: BigInt(0),
+};
 
 main();
 
@@ -125,14 +142,14 @@ async function main() {
     return;
   }
 
-  if(!options['privkey']) {
+  var walletKey = loadPrivateKey();
+  if(!walletKey) {
     printHelp();
     console.log("No wallet privkey specified.");
     console.log("");
     return;
   }
 
-  var walletKey = Buffer.from(options['privkey'], "hex");
   var walletAddr = EthUtil.toChecksumAddress("0x"+EthUtil.privateToAddress(walletKey).toString("hex"));
   wallet = {
     privkey: walletKey,
@@ -163,6 +180,10 @@ async function main() {
     return;
   }
 
+  if(options['output'] && fs.existsSync(options['output'])) {
+    fs.unlinkSync(options['output']);
+  }
+
   if(options['output'] && options['chainid']) {
     // use in offline mode
     web3 = new Web3();
@@ -179,6 +200,21 @@ async function main() {
   await Promise.all(pendingQueue.map((entry) => entry.promise));
 
   console.log("fundings complete!");
+
+  if(options['summary']) {
+    let summary = [
+      "WalletAddress: " + wallet.addr,
+      "TotalAmountWei: " + stats.totalAmount.toString(),
+      "TotalAmountEth: " + weiToEth(stats.totalAmount),
+      "TransactionCount: " + stats.transactionCount,
+    ];
+    if(distributor) {
+      summary.push("TransferCount: " + stats.transferCount);
+      summary.push("DistributorAddr: " + distributor.addr);
+    }
+    
+    fs.writeFileSync(options['summary'], summary.join("\n"));
+  }
 }
 
 function printHelp() {
@@ -202,6 +238,21 @@ function sleepPromise(timeout) {
 
 function weiToEth(wei) {
   return parseInt((wei / 1000000000000000n).toString()) / 1000;
+}
+
+function loadPrivateKey() {
+  if(options['privkey'] === "env" && (process.env.FUNDINGTOOL_PRIVKEY || "").match(/^[0-9a-f]{64}$/i)) {
+    return Buffer.from(process.env.FUNDINGTOOL_PRIVKEY, "hex");
+  }
+  if(options['privkey'] && options['privkey'].match(/^[0-9a-f]{64}$/i)) {
+    return Buffer.from(options['privkey'], "hex");
+  }
+  if(options['random-privkey']) {
+    let wallet = EthWallet.default.generate();
+    return Buffer.from(wallet.getPrivateKeyString().replace(/^0x/, ""), "hex");
+  }
+  
+  return null;
 }
 
 function loadFundingFile(resArray, fundingList) {
@@ -302,6 +353,10 @@ async function processFunding(address, amount) {
   var txres = await publishTransaction(txhex);
   console.log("  tx hash: " + txres[0]);
 
+  stats.transferCount++;
+  stats.transactionCount++;
+  stats.totalAmount += amount;
+
   var txobj = {
     nonce: wallet.nonce,
     hash: txres[0],
@@ -399,6 +454,8 @@ async function deployDistributor() {
       return distributorState.contractAddr;
   }
 
+  stats.transactionCount++;
+
   var nonce = wallet.nonce;
   var rawTx = {
     nonce: nonce,
@@ -434,6 +491,7 @@ async function processFundingBatch(batch) {
   batch.forEach((entry) => {
     console.log("process funding " + entry.address + ":  " + weiToEth(entry.amount) + " ETH");
     totalAmount += entry.amount;
+    stats.transferCount++;
   });
 
   if(totalAmount > wallet.balance && !wallet.offline) {
@@ -463,6 +521,9 @@ async function processFundingBatch(batch) {
   var txhex = tx.serialize().toString('hex');
   var txres = await publishTransaction(txhex);
   console.log("  tx hash: " + txres[0]);
+
+  stats.transactionCount++;
+  stats.totalAmount += totalAmount;
 
   var txobj = {
     nonce: nonce,
