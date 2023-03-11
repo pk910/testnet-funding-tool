@@ -321,7 +321,7 @@ async function initDistributor() {
 async function processFundings() {
   try {
     let distrCount;
-    let lastLogIdx = 0;
+    let lastLogTime = 0;
     let totalCount = fundings.length;
 
     while(fundings.length > 0) {
@@ -343,8 +343,11 @@ async function processFundings() {
         fundings.shift();
       }
 
-      if(stats.transactionCount - lastLogIdx >= 100)
+      let now = (new Date()).getTime();
+      if(now - lastLogTime >= 5000) {
         console.log("distributing... progress: " + stats.transferCount + " / " + totalCount);
+        lastLogTime = now;
+      }
     }
   } catch(ex) {
     console.error("funding loop exception: ", ex);
