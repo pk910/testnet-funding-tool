@@ -271,8 +271,8 @@ function loadFundingFile(resArray, fundingList) {
     if(fundingEntry.length < 2)
       continue;
     resArray.push({
-      address: fundingEntry[0],
-      amount: BigInt(fundingEntry[1].replace(/ETH/i, "000000000000000000"))
+      address: fundingEntry[0].trim(),
+      amount: BigInt(fundingEntry[1].replace(/[ \t]*ETH/i, "000000000000000000").replace(/[ \t]*gwei/i, "000000000").trim()),
     });
   }
 }
@@ -505,16 +505,34 @@ async function deployDistributor() {
 
 async function processFundingBatch(batch) {
   var totalAmount = BigInt(0);
+  var amountsDict = {};
   batch.forEach((entry) => {
     if(options['verbose'])
       console.log("process funding " + entry.address + ":  " + weiToEth(entry.amount) + " ETH");
     totalAmount += entry.amount;
     stats.transferCount++;
+    amountsDict[entry.amount] = true;
   });
 
   if(totalAmount > wallet.balance && !wallet.offline) {
     console.log("  batch size (" + weiToEth(totalAmount) + " ETH) exceeds wallet balance (" + weiToEth(wallet.balance) + " ETH)");
     return;
+  }
+
+  var callData = null;
+  var addrs = Buffer.concat(batch.map((e) => Buffer.from(e.address.replace(/^0x/i, ""), "hex")));
+  if(Object.keys(amountsDict).length === 1) {
+    // all same amount, use distributeEqual(bytes calldata addrs)
+    callData = distributor.contract.methods.distributeEqual(addrs).encodeABI();
+  } else if(Object.keys(amountsDict).filter(a => (BigInt(a) % 1000000000000000000n) === 0n).length === 0) {
+    // only full ether amounts, use distributeEther(bytes calldata addrs, uint32[] calldata values)
+    callData = distributor.contract.methods.distributeEther(addrs, batch.map((e) => e.amount / 1000000000000000000n)).encodeABI();
+  } else if(Object.keys(amountsDict).filter(a => (BigInt(a) % 1000000000n) === 0n).length === 0) {
+    // only full gwei amounts, use distributeGwei(bytes calldata addrs, uint64[] calldata values)
+    callData = distributor.contract.methods.distributeGwei(addrs, batch.map((e) => e.amount / 1000000000n)).encodeABI();
+  } else {
+    // use distribute(bytes calldata addrs, uint256[] calldata values)
+    callData = distributor.contract.methods.distributeGwei(addrs, batch.map((e) => e.amount)).encodeABI();
   }
 
   var nonce = wallet.nonce;
@@ -526,10 +544,7 @@ async function processFundingBatch(batch) {
     from: wallet.addr,
     to: distributor.addr,
     value: "0x" + totalAmount.toString(16),
-    data: distributor.contract.methods.distribute(
-      batch.map((e) => e.address),
-      batch.map((e) => e.amount),
-    ).encodeABI()
+    data: callData
   };
 
   var privateKey = Uint8Array.from(wallet.privkey);
