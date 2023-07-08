@@ -532,7 +532,7 @@ async function processFundingBatch(batch) {
     callData = distributor.contract.methods.distributeGwei(addrs, batch.map((e) => e.amount / 1000000000n)).encodeABI();
   } else {
     // use distribute(bytes calldata addrs, uint256[] calldata values)
-    callData = distributor.contract.methods.distributeGwei(addrs, batch.map((e) => e.amount)).encodeABI();
+    callData = distributor.contract.methods.distribute(addrs, batch.map((e) => e.amount)).encodeABI();
   }
 
   var nonce = wallet.nonce;
